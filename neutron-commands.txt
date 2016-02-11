@@ -1,0 +1,160 @@
+
+#!/usr/bin/env bash
+set -x
+trap read debug # line by line
+
+source ~/keystonerc_admin
+
+neutron net-create ext-net --router:external True \
+                           --provider:physical_network external \
+                           --provider:network_type flat \
+                           --shared
+
+
+neutron subnet-create ext-net --name ext-subnet --allocation-pool=start=10.254.0.2,end=10.254.0.127 --disable-dhcp --gateway 10.254.0.1 10.254.0.1/16
+
+source ~/keystonerc_demo
+
+neutron net-create private
+neutron subnet-create private --name private-subnet 192.168.0.0/24 --gateway 192.168.0.1
+neutron router-create router1
+neutron router-interface-add router1 private-subnet
+neutron router-gateway-set router1 ext-net
+
+
+export NET_ID=$(neutron net-list -f csv | grep private | cut -d\" -f2)
+
+nova boot --flavor m1.small --key_name ajo --nic net-id=$NET_ID --image httpd-1 server1
+
+nova boot --flavor m1.small --key_name ajo --nic net-id=$NET_ID --image httpd-2 server2
+
+neutron floatingip-create ext-net
+neutron floatingip-create ext-net
+neutron floatingip-create ext-net
+
+FIP1=$(neutron floatingip-list -f csv | head -n 2 | tail -n 1 | cut -d\" -f6)
+FIP2=$(neutron floatingip-list -f csv | head -n 3 | tail -n 1 | cut -d\" -f6)
+FIP1_ID=$(neutron floatingip-list -f csv | head -n 2 | tail -n 1 | cut -d\" -f2)
+
+nova floating-ip-associate server1 $FIP1
+nova floating-ip-associate server2 $FIP2
+
+neutron security-group-rule-create default --direction ingress
+
+echo IPs de los servidores: $FIP1 y $FIP2
+
+ping -c 5 $FIP1 & ping -c 5 $FIP2
+
+echo Ahora desasociamos las IP flotantes del servidor
+
+nova floating-ip-disassociate server1 $FIP1
+nova floating-ip-disassociate server2 $FIP2
+
+SERVER1_IP=$(nova list | cut -d\= -f2 | cut -d\| -f1 | head -n 4 | tail -n 1)
+SERVER2_IP=$(nova list | cut -d\= -f2 | cut -d\| -f1 | head -n 5 | tail -n 1)
+
+export SUBNET_ID=$(neutron subnet-list -f csv | grep private | cut -d\" -f 2)
+neutron lb-pool-create --name http-pool --lb-method ROUND_ROBIN \
+                       --protocol HTTP --subnet-id $SUBNET_ID
+neutron lb-member-create --protocol-port 80 --address $SERVER1_IP http-pool
+neutron lb-member-create --protocol-port 80 --address $SERVER2_IP http-pool
+neutron lb-pool-show http-pool
+
+VIP_PORT=$(neutron lb-vip-create --name http-vip --protocol-port 80 --protocol HTTP \
+                      --subnet-id $SUBNET_ID http-pool |grep port_id | cut -d\| -f3)
+
+neutron floatingip-associate $FIP1_ID $VIP_PORT
+
+echo http://$FIP1
+
+
+while true; do curl http://10.254.0.5/; sleep 0.5; done
+
+
+
+# EXTRA DEMO
+
+#!/usr/bin/env bash
+set -x
+trap read debug # line by line
+
+
+source ~/keystonerc_demo
+
+neutron net-create private2
+neutron subnet-create private2 --name private-subnet2 192.168.2.0/24 --gateway 192.168.2.1
+
+neutron router-create router2
+neutron router-interface-add router2 private-subnet2
+neutron router-gateway-set router2 ext-net
+
+neutron net-create dbbackend
+neutron subnet-create dbbackend --name private-subnet-back 192.168.3.0/24 --gateway 192.168.3.1
+
+export NET2_ID=$(neutron net-list -f csv | grep private2 | cut -d\" -f2)
+export NETD_ID=$(neutron net-list -f csv | grep dbbackend | cut -d\" -f2)
+
+nova boot --flavor m1.tiny --key_name ajo --nic net-id=$NET2_ID --image cirros server3
+nova boot --flavor m1.tiny --key_name ajo --nic net-id=$NET2_ID --nic net-id=$NETD_ID --image cirros server4
+
+nova boot --flavor m1.tiny --key_name ajo --nic net-id=$NETD_ID --image cirros database-server1
+nova boot --flavor m1.tiny --key_name ajo --nic net-id=$NETD_ID --image cirros database-server2
+
+
+FIP1=$(neutron floatingip-create ext-net | grep floating_ip_address | cut -d\| -f3)
+FIP2=$(neutron floatingip-create ext-net | grep floating_ip_address | cut -d\| -f3)
+
+nova floating-ip-associate server3 $FIP1
+nova floating-ip-associate server4 $FIP2
+
+echo IPs de los servidores: $FIP1 y $FIP2
+
+ping -c 10 $FIP1 & ping -c 10 $FIP2
+
+
+##ip address add 192.168.3.3/24 dev eth1
+
+
+
+centos7 image:
+wget http://cloud.centos.org/centos/7/images/CentOS-7-x86_64-GenericCloud-1601.qcow2c
+glance image-create --name='centos7' --visibility public --container-format=bare --disk-format=qcow2 < CentOS-7-x86_64-GenericCloud-1601.qcow2c
+wget http://uec-images.ubuntu.com/releases/14.04/release/ubuntu-14.04-server-cloudimg-amd64-disk1.img
+glance image-create --name='ubuntu14' --visibility public --container-format=bare --disk-format=qcow2 < ubuntu-14.04-server-cloudimg-amd64-disk1.img
+wget http://cdimage.debian.org/cdimage/openstack/8.3.0/debian-8.3.0-openstack-amd64.qcow2
+glance image-create --name='debian83' --visibility public --container-format=bare --disk-format=qcow2 < debian-8.3.0-openstack-amd64.qcow2
+
+# neutron floatingip-create ext-net
+Created a new floatingip:
++---------------------+--------------------------------------+
+| Field               | Value                                |
++---------------------+--------------------------------------+
+| fixed_ip_address    |                                      |
+| floating_ip_address | 10.254.0.2                           |
+| floating_network_id | 45197f70-319a-4d3a-86ad-3759ad3a8eca |
+| id                  | 3ce48097-f0ae-4b5c-a5cc-9811c00e1f55 |
+| port_id             |                                      |
+| router_id           |                                      |
+| status              | DOWN                                 |
+| tenant_id           | f8c9d98a8dc444ffbc9c1fbfffb94d5a     |
++---------------------+--------------------------------------+
+[root@aio-centos7-liberty ~(keystone_admin)]# neutron floatingip-create ext-net
+Created a new floatingip:
++---------------------+--------------------------------------+
+| Field               | Value                                |
++---------------------+--------------------------------------+
+| fixed_ip_address    |                                      |
+| floating_ip_address | 10.254.0.3                           |
+| floating_network_id | 45197f70-319a-4d3a-86ad-3759ad3a8eca |
+| id                  | b169f8a2-18c0-41ee-9c5f-00387491d72c |
+| port_id             |                                      |
+| router_id           |                                      |
+| status              | DOWN                                 |
+| tenant_id           | f8c9d98a8dc444ffbc9c1fbfffb94d5a     |
++---------------------+--------------------------------------+
+
+# neutron security-group-rule-create faca2c0a-bef9-4160-9811-74eb6572226d --direction ingress
+
+nova keypair-add ajo --pub-key -
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDYrnpIhLDtRuy09FCMVlRc7/sSjM4IQ8/+CYzeCgxdq1BAdmC/9T/HRCC7LkuJog+UL47J97OUfmkGAtkiDUMKdRvDlm0YxDm4rWJ2GxNUf7JLsxOopdD/eBZNnOfq18uTMGPHhUpGkWrxkqMc9C8lNYAjCKHCwNghHMXYxgziXqF2oxuFdrTuaP5St+SnE32sqn0CQMey5xJWlBt6DNQXOl2taANvtOw13i54afydOpdaQOGNOaArnoqS1lFhyBt/fvDtg7xC4E9faHstb70ed/BJ4tktzjK/W2Cl8HO6tjrAMDPFkoEOicahIvjgJVZGYOBOoO/UsD9zHRpYnUEh ajo@MacBook-Air-de-Miguel.local
+<CTRL+D>
