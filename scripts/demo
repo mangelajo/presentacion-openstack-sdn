@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+set -x
+# this will make the script execution wait for ENTER at each line
+trap read debug # line by line
+
+
+source ~/keystonerc_admin
+
+# create a shared external network, as an administrator
+
+neutron net-create ext-net --router:external True \
+                           --provider:physical_network external \
+                           --provider:network_type flat \
+                           --shared
+
+
+neutron subnet-create ext-net --name ext-subnet --allocation-pool=start=10.0.0.2,end=10.0.0.127 --disable-dhcp --gateway 10.0.0.1 10.0.0.1/16
+
+source ~/keystonerc_demo
+
+# create a private network, and router
+
+neutron net-create private
+neutron subnet-create private --name private-subnet 192.168.0.0/24 --gateway 192.168.0.1
+neutron router-create router1
+neutron router-interface-add router1 private-subnet
+neutron router-gateway-set router1 ext-net
+
+export NET_ID=$(neutron net-list -f csv | grep private | cut -d\" -f2)
+
+# boot a couple of servers in that net
+
+nova boot --flavor m1.small --key_name ajo --nic net-id=$NET_ID --image httpd-1 server1
+
+nova boot --flavor m1.small --key_name ajo --nic net-id=$NET_ID --image httpd-2 server2
+
+nova list
+
+# create floating ips
+
+neutron floatingip-create ext-net
+neutron floatingip-create ext-net
+neutron floatingip-create ext-net
+
+FIP1=$(neutron floatingip-list -f csv | head -n 2 | tail -n 1 | cut -d\" -f6)
+FIP2=$(neutron floatingip-list -f csv | head -n 3 | tail -n 1 | cut -d\" -f6)
+FIP1_ID=$(neutron floatingip-list -f csv | head -n 2 | tail -n 1 | cut -d\" -f2)
+
+# associate to servers
+
+nova floating-ip-associate server1 $FIP1
+nova floating-ip-associate server2 $FIP2
+
+neutron security-group-rule-create default --direction ingress
+
+echo servidores: $FIP1 y $FIP2
+
+ping -c 40 $FIP1 & ping -c 40 $FIP2
+
+echo Desactivar ips flotantes ..
+echo Desactivar ips flotantes ...
+echo Desactivar ips flotantes ....
+echo Desactivar ips flotantes .....
+echo Desactivar ips flotantes ......
+
+# disassociate after testing
+
+nova floating-ip-disassociate server1 $FIP1
+nova floating-ip-disassociate server2 $FIP2
+
+# create a load balancer in front for port 80
+
+SERVER1_IP=$(nova list | cut -d\= -f2 | cut -d\| -f1 | head -n 4 | tail -n 1)
+SERVER2_IP=$(nova list | cut -d\= -f2 | cut -d\| -f1 | head -n 5 | tail -n 1)
+
+neutron subnet-list
+export SUBNET_ID=$(neutron subnet-list -f csv | grep private | cut -d\" -f 2)
+neutron lb-pool-create --name http-pool --lb-method ROUND_ROBIN \
+                       --protocol HTTP --subnet-id $SUBNET_ID
+neutron lb-member-create --protocol-port 80 --address $SERVER1_IP http-pool
+neutron lb-member-create --protocol-port 80 --address $SERVER2_IP http-pool
+
+VIP_PORT=$(neutron lb-vip-create --name http-vip --protocol-port 80 --protocol HTTP \
+                      --subnet-id $SUBNET_ID http-pool |grep port_id | cut -d\| -f3)
+
+neutron floatingip-associate $FIP1_ID $VIP_PORT
+
+echo http://$FIP1
+
+./lbtest $FIP1

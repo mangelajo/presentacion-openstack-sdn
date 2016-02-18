@@ -1,0 +1,2 @@
+#!/bin/sh
+while true; do curl http://$1 ; echo El balanceador de carga está en: http://$1;  sleep 0.5; done

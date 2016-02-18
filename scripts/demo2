@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -x
+trap read debug # line by line
+
+
+source ~/keystonerc_demo
+
+neutron net-create private2
+neutron subnet-create private2 --name private-subnet2 192.168.2.0/24 --gateway 192.168.2.1
+
+neutron router-create router2
+neutron router-interface-add router2 private-subnet2
+neutron router-gateway-set router2 ext-net
+
+neutron net-create dbbackend
+neutron subnet-create dbbackend --name private-subnet-back 192.168.3.0/24 --gateway 192.168.3.1
+
+export NET2_ID=$(neutron net-list -f csv | grep private2 | cut -d\" -f2)
+export NETD_ID=$(neutron net-list -f csv | grep dbbackend | cut -d\" -f2)
+
+nova boot --flavor m1.tiny --key_name ajo --nic net-id=$NET2_ID --image cirros server3
+nova boot --flavor m1.tiny --key_name ajo --nic net-id=$NET2_ID --nic net-id=$NETD_ID --image cirros server4
+
+nova boot --flavor m1.tiny --key_name ajo --nic net-id=$NETD_ID --image cirros database-server1
+nova boot --flavor m1.tiny --key_name ajo --nic net-id=$NETD_ID --image cirros database-server2
+
+
+FIP1=$(neutron floatingip-create ext-net | grep floating_ip_address | cut -d\| -f3)
+FIP2=$(neutron floatingip-create ext-net | grep floating_ip_address | cut -d\| -f3)
+
+nova floating-ip-associate server3 $FIP1
+nova floating-ip-associate server4 $FIP2
+
+echo IPs de los servidores: $FIP1 y $FIP2
+
+ping -c 40 $FIP1 & ping -c 40 $FIP2
+

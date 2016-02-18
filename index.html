@@ -25,24 +25,22 @@ y a veces ayudo empaquetando.
 
 ---
 
-# ¿Qué es una SDN?
+# ¿Qué es SDN?
 
- * Software Defined Networking
- * una red completamente modelable bajo demanda.
- * para uso de máquinas virtuales, o servidores físicos.
+ * Software Defined Networking: una red completamente modelable bajo demanda,
+ para uso de máquinas virtuales, o servidores físicos.
 
 ---
 
 # ¿Qué es Neutron?
 
- * API HTTP/REST
+ * API SDN HTTP/REST OpenStack
+
  * Basado en plugins:
-   - referencia/linux
-   - Cisco
-   - BigSwitch
-   - Nuage
+   - abiertos: referencia/linux, ODL, OVN, DragonFlow, Midonet, Opencontrail
+   - proprietarios: Cisco, BigSwitch, Nuage, Brocade, Plumgrid ...
    - .....
- * Integración baremetal (ironic), docker (kuryr), VMs (nova)
+ * Integración VMs (nova), baremetal (ironic), docker (kuryr)...
 
 ---
 
@@ -50,11 +48,12 @@ y a veces ayudo empaquetando.
 
  * Redes / Subredes / DHCP automatizado
  * Puertos
- * Grupos de seguridad (firewall en los puertos VM)
+ * Grupos de seguridad (firewall en puertos VM)
  * Routers
- * LBaaS: Balanceadores de carga
- * FWaaS: Firewalls (en los routers)
- * QoS: Calidad de servicio
+ * LBaaS
+ * FWaaS
+ * VPNaaS
+ * QoS
 
 ---
 
@@ -69,7 +68,7 @@ y a veces ayudo empaquetando.
     - VLAN
     - FLAT
 
----
+???
 
 ### ¿Como funciona? ...
   * neutron-server (API)
@@ -78,17 +77,61 @@ y a veces ayudo empaquetando.
     - dhcp-agent
     - lbaas-agent
     - openvswitch-agent
----
+
 ### ¿Como funciona? .....
   * Instalando agentes en los hipervisores
     - openvswitch-agent
 
 ---
 
+### Arquitecturas: clásica
+nodo de red da servicios dhcp, router, nat, etc
+
+.center.medium[![][n-classic]]
+
+[n-classic]: assets/neutron-clasico.svg
+---
+### Arquitecturas: HA A/A A/B
+Alta disponibilidad A/A, A/B: routers duplicados >=2 veces, VRRP
+
+.center.medium[![][n-ha]]
+
+[n-ha]: assets/neutron-ha.svg
+
+---
+### Arquitecturas: Distributed Virtual Routers
+
+.center.medium[![][n-dvr]]
+
+[n-dvr]: assets/neutron-dvr.svg
+
+---
 class: center, middle
 
 # DEMO TIME!
 
+
+link:  http://YOUR-AIO-IP/dashboard/project/network_topology/
+
+[cleanup]
+
+[demo1]
+
+[demo2]
+
+[images]
+
+[cleanup]: scripts/cleanup
+[demo1]: scripts/demo1
+[demo2]: scripts/demo2
+[images]: http://fileshare.ajo.es/redhat/openstack-miniconf/rdo-sdn/
+
+???
+nova list | grep server4 | cut -d\= -f3 | cut -d\| -f1
+
+sudo ip address add 192.168.3.3/24 dev eth1
+
+sudo ip link set dev eth1 up
 ---
 
 class: center, middle
@@ -99,7 +142,7 @@ class: center, middle
 
   Miguel Ángel Ajo (mangelajo@redhat.com)
 
-  - http://developer.openstack.org/api-ref-networking-v2.html
+http://developer.openstack.org/api-ref-networking-v2.html
 
 http://mangelajo.github.io/presentacion-openstack-sdn/
 
